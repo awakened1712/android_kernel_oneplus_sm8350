@@ -851,6 +851,14 @@ KBUILD_CFLAGS	+= $(call cc-disable-warning, format-truncation)
 KBUILD_CFLAGS	+= $(call cc-disable-warning, format-overflow)
 KBUILD_CFLAGS	+= $(call cc-disable-warning, address-of-packed-member)
 
+ifdef CONFIG_CC_IS_CLANG
+KBUILD_CFLAGS += -mcpu=cortex-a55
+KBUILD_AFLAGS += -mcpu=cortex-a55
+else
+KBUILD_CFLAGS += -mcpu=cortex-a76.cortex-a55
+KBUILD_AFLAGS += -mcpu=cortex-a76.cortex-a55
+endif
+
 ifdef CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE
 KBUILD_CFLAGS += -O2
 else ifdef CONFIG_CC_OPTIMIZE_FOR_PERFORMANCE_O3
