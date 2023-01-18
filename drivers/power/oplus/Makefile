@@ -22,10 +22,7 @@ else
 
 obj-$(CONFIG_OPLUS_CHG)		+= v1/
 obj-$(CONFIG_OPLUS_CHG_V2)	+= v2/
-ifeq ($(CONFIG_OPLUS_CHG),m)
-ifeq ($(CONFIG_OPLUS_CHG_V2),m)
-obj-m	+= oplus_chg_symbol.o
-endif
-endif
+
+obj-y	+= oplus_chg_symbol.o
 
 endif
