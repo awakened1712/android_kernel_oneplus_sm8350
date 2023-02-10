@@ -15,6 +15,7 @@
 #include "oplus_display_private_api.h"
 #include "oplus_display_panel.h"
 #include "oplus_adfr.h"
+#include "oplus_aod.h"
 
 #define DSI_PANEL_OPLUS_DUMMY_VENDOR_NAME  "PanelVendorDummy"
 #define DSI_PANEL_OPLUS_DUMMY_MANUFACTURE_NAME  "dummy1024"
@@ -22,6 +23,8 @@
 bool oplus_pcc_enabled = false;
 bool oplus_skip_pcc = false;
 bool apollo_backlight_enable = false;
+int oplus_dimlayer_hbm_saved = 0;
+int oplus_dimlayer_aod = 0;
 int oplus_aod_dim_alpha = CUST_A_NO;
 struct drm_msm_pcc oplus_save_pcc;
 
@@ -42,6 +45,7 @@ extern int oplus_dimlayer_hbm_vblank_count;
 extern atomic_t oplus_dimlayer_hbm_vblank_ref;
 extern int oplus_onscreenfp_status;
 extern u32 oplus_onscreenfp_vblank_count;
+extern int aod_light_mode;
 extern ktime_t oplus_onscreenfp_pressed_time;
 extern unsigned int is_project(int project);
 
@@ -185,6 +189,52 @@ static int bl_to_alpha_dc(int brightness)
 	return alpha;
 }
 
+static int bl_to_alpha_aod(int brightness)
+{
+	struct dsi_display *display = get_main_display();
+	struct oplus_brightness_alpha *lut = NULL;
+	int count = 0;
+	int i = 0;
+	int alpha;
+
+	if (!display)
+		return 0;
+
+	if (aod_light_mode == 1) {
+		if (display->panel->aod_low_ba_seq && display->panel->aod_low_ba_count) {
+			count = display->panel->aod_low_ba_count;
+			lut = display->panel->aod_low_ba_seq;
+		} else {
+			/* missing config; return 0 (fully transparent) */
+			return 0;
+		}
+	} else {
+		if (display->panel->aod_high_ba_seq && display->panel->aod_high_ba_count) {
+			count = display->panel->aod_high_ba_count;
+			lut = display->panel->aod_high_ba_seq;
+		} else {
+			/* missing config; return 0 (fully transparent) */
+			return 0;
+		}
+	}
+
+	for (i = 0; i < count; i++){
+		if (lut[i].brightness >= brightness)
+			break;
+	}
+
+	if (i == 0)
+		alpha = lut[0].alpha;
+	else if (i == count)
+		alpha = lut[count - 1].alpha;
+	else
+		alpha = interpolate(brightness, lut[i - 1].brightness,
+				    lut[i].brightness, lut[i - 1].alpha,
+				    lut[i].alpha);
+
+	return alpha;
+}
+
 static int brightness_to_alpha(int brightness)
 {
 	int alpha;
@@ -199,7 +249,8 @@ static int brightness_to_alpha(int brightness)
 
 	if (oplus_dimlayer_hbm) {
 		alpha = bl_to_alpha(brightness);
-
+	} else if (oplus_dimlayer_aod) {
+		alpha = bl_to_alpha_aod(brightness);
 	} else {
 		alpha = bl_to_alpha_dc(brightness);
 	}
@@ -435,6 +486,7 @@ int dsi_panel_parse_oplus_config(struct dsi_panel *panel)
 
 	dsi_panel_parse_oplus_fod_config(panel);
 	dsi_panel_parse_oplus_backlight_remapping_config(panel);
+	dsi_panel_parse_oplus_aod_config(panel);
 
 	panel->oplus_priv.vendor_name = utils->get_property(utils->data,
 				       "oplus,mdss-dsi-vendor-name", NULL);
@@ -782,7 +834,7 @@ int oplus_display_panel_get_dimlayer_hbm(void *data)
 {
 	uint32_t *dimlayer_hbm = data;
 
-	(*dimlayer_hbm) = oplus_dimlayer_hbm;
+	(*dimlayer_hbm) = oplus_dimlayer_hbm_saved;
 
 	return 0;
 }
@@ -796,24 +848,39 @@ int oplus_display_panel_set_dimlayer_hbm(void *data)
 	int value = (*dimlayer_hbm);
 
 	value = !!value;
-	if (oplus_dimlayer_hbm == value)
+	if (oplus_dimlayer_hbm_saved == value)
 		return 0;
-	if (!dsi_connector || !dsi_connector->state || !dsi_connector->state->crtc) {
-		pr_err("[%s]: display not ready\n", __func__);
-	} else {
-		err = drm_crtc_vblank_get(dsi_connector->state->crtc);
-		if (err) {
-			pr_err("failed to get crtc vblank, error=%d\n", err);
+	if (get_oplus_display_power_status() == OPLUS_DISPLAY_POWER_ON) {
+		if (!dsi_connector || !dsi_connector->state || !dsi_connector->state->crtc) {
+			pr_err("[%s]: display not ready\n", __func__);
 		} else {
-			/* do vblank put after 5 frames */
-			oplus_dimlayer_hbm_vblank_count = 5;
-			atomic_inc(&oplus_dimlayer_hbm_vblank_ref);
+			err = drm_crtc_vblank_get(dsi_connector->state->crtc);
+			if (err) {
+				pr_err("failed to get crtc vblank, error=%d\n", err);
+			} else {
+				/* do vblank put after 5 frames */
+				oplus_dimlayer_hbm_vblank_count = 5;
+				atomic_inc(&oplus_dimlayer_hbm_vblank_ref);
+			}
 		}
+		oplus_dimlayer_hbm = value;
 	}
-	oplus_dimlayer_hbm = value;
-	pr_err("debug for oplus_display_set_dimlayer_hbm set oplus_dimlayer_hbm = %d\n", oplus_dimlayer_hbm);
+	oplus_dimlayer_hbm_saved = value;
+	pr_err("debug for oplus_display_set_dimlayer_hbm set oplus_dimlayer_hbm = %d, oplus_dimlayer_hbm_saved = %d\n",
+		oplus_dimlayer_hbm, oplus_dimlayer_hbm_saved);
 
 	return 0;
+}
+
+void oplus_dimlayer_vblank(struct drm_crtc *crtc) {
+	int err = drm_crtc_vblank_get(crtc);
+	if (err) {
+		pr_err("failed to get crtc vblank, error=%d\n", err);
+	} else {
+		/* do vblank put after 5 frames */
+		oplus_dimlayer_hbm_vblank_count = 5;
+		atomic_inc(&oplus_dimlayer_hbm_vblank_ref);
+	}
 }
 
 int oplus_display_panel_notify_fp_press(void *data)
