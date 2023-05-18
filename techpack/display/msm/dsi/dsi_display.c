@@ -1603,6 +1603,8 @@ int dsi_display_set_power(struct drm_connector *connector,
 		int power_mode, void *disp)
 {
 	struct dsi_display *display = disp;
+	int blank;
+	struct drm_panel_notifier notifier_data;
 	int rc = 0;
 
 	if (!display || !display->panel) {
@@ -1617,11 +1619,17 @@ int dsi_display_set_power(struct drm_connector *connector,
 				DSI_WARN("failed to set load for lp1 state\n");
 		}
 		rc = dsi_panel_set_lp1(display->panel);
+                blank = DRM_PANEL_BLANK_POWERDOWN;
+		notifier_data.data = &blank;
+		drm_panel_notifier_call_chain(&display->panel->drm_panel, DRM_PANEL_EARLY_EVENT_BLANK, &notifier_data);
 		break;
 	case SDE_MODE_DPMS_LP2:
 		rc = dsi_panel_set_lp2(display->panel);
 		if (dsi_display_set_ulp_load(display, true) < 0)
 			DSI_WARN("failed to set load for lp2 state\n");
+		blank = DRM_PANEL_BLANK_POWERDOWN;
+		notifier_data.data = &blank;
+		drm_panel_notifier_call_chain(&display->panel->drm_panel, DRM_PANEL_EARLY_EVENT_BLANK, &notifier_data);
 		break;
 	case SDE_MODE_DPMS_ON:
 		if (display->panel->power_mode == SDE_MODE_DPMS_LP2) {
