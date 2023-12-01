@@ -83,6 +83,10 @@ __read_mostly int scheduler_running;
  */
 int sysctl_sched_rt_runtime = 950000;
 
+#ifdef CONFIG_NO_HZ_COMMON
+cpumask_t cpu_wclaimed_mask;
+#endif
+
 /*
  * __task_rq_lock - lock the rq @p resides on.
  */
@@ -2329,6 +2333,9 @@ int select_task_rq(struct task_struct *p, int cpu, int sd_flags, int wake_flags,
 			(cpu_isolated(cpu) && !allow_isolated))
 		cpu = select_fallback_rq(task_cpu(p), p, allow_isolated);
 
+#ifdef CONFIG_NO_HZ_COMMON
+	cpumask_test_and_set_cpu(cpu, &cpu_wclaimed_mask);
+#endif
 	return cpu;
 }
 
@@ -3007,6 +3014,8 @@ static void __sched_fork(unsigned long clone_flags, struct task_struct *p)
 	p->wts.low_latency		= 0;
 	p->wts.iowaited			= false;
 #endif
+	p->se.vlag			= 0;
+	p->se.slice			= sysctl_sched_base_slice;
 	INIT_LIST_HEAD(&p->se.group_node);
 
 #ifdef CONFIG_FAIR_GROUP_SCHED

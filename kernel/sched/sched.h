@@ -65,6 +65,7 @@
 #include <linux/syscalls.h>
 #include <linux/task_work.h>
 #include <linux/tsacct_kern.h>
+#include <linux/rbtree_augmented.h>
 
 #include <asm/tlb.h>
 
@@ -623,6 +624,9 @@ struct cfs_rq {
 	unsigned int		h_nr_running;      /* SCHED_{NORMAL,BATCH,IDLE} */
 	unsigned int		idle_h_nr_running; /* SCHED_IDLE */
 
+	s64			avg_vruntime;
+	u64			avg_load;
+
 	u64			exec_clock;
 	u64			min_vruntime;
 #ifndef CONFIG_64BIT
@@ -637,8 +641,6 @@ struct cfs_rq {
 	 */
 	struct sched_entity	*curr;
 	struct sched_entity	*next;
-	struct sched_entity	*last;
-	struct sched_entity	*skip;
 
 #ifdef	CONFIG_SCHED_DEBUG
 	unsigned int		nr_spread_over;
@@ -1693,15 +1695,7 @@ static inline void __set_task_cpu(struct task_struct *p, unsigned int cpu)
 #endif
 }
 
-/*
- * Tunables that become constants when CONFIG_SCHED_DEBUG is off:
- */
-#ifdef CONFIG_SCHED_DEBUG
-# include <linux/static_key.h>
-# define const_debug __read_mostly
-#else
-# define const_debug const
-#endif
+#define const_debug __read_mostly
 
 #define SCHED_FEAT(name, enabled)	\
 	__SCHED_FEAT_##name ,
@@ -1856,6 +1850,7 @@ extern const u32		sched_prio_to_wmult[40];
 #else
 #define ENQUEUE_MIGRATED	0x00
 #endif
+#define ENQUEUE_INITIAL		0x80
 
 #define RETRY_TASK		((void *)-1UL)
 
@@ -2146,6 +2141,8 @@ extern void check_preempt_curr(struct rq *rq, struct task_struct *p, int flags);
 
 extern const_debug unsigned int sysctl_sched_nr_migrate;
 extern const_debug unsigned int sysctl_sched_migration_cost;
+
+extern unsigned int sysctl_sched_base_slice;
 
 #ifdef CONFIG_SCHED_HRTICK
 
@@ -2559,6 +2556,7 @@ extern void cfs_bandwidth_usage_dec(void);
 
 #define nohz_flags(cpu)	(&cpu_rq(cpu)->nohz_flags)
 
+extern cpumask_t cpu_wclaimed_mask;
 extern void nohz_balance_exit_idle(struct rq *rq);
 #else
 static inline void nohz_balance_exit_idle(struct rq *rq) { }
@@ -3442,3 +3440,6 @@ static inline void walt_irq_work_queue(struct irq_work *work)
 	irq_work_queue(work);
 }
 #endif
+
+extern u64 avg_vruntime(struct cfs_rq *cfs_rq);
+extern int entity_eligible(struct cfs_rq *cfs_rq, struct sched_entity *se);
