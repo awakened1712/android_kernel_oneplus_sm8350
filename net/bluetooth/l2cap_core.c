@@ -1379,7 +1379,8 @@ static void l2cap_request_info(struct l2cap_conn *conn)
 	conn->info_state |= L2CAP_INFO_FEAT_MASK_REQ_SENT;
 	conn->info_ident = l2cap_get_ident(conn);
 
-	schedule_delayed_work(&conn->info_timer, L2CAP_INFO_TIMEOUT);
+	queue_delayed_work(system_power_efficient_wq,
+			&conn->info_timer, L2CAP_INFO_TIMEOUT);
 
 	l2cap_send_cmd(conn, conn->info_ident, L2CAP_INFO_REQ,
 		       sizeof(req), &req);
@@ -3969,7 +3970,8 @@ sendresp:
 		conn->info_state |= L2CAP_INFO_FEAT_MASK_REQ_SENT;
 		conn->info_ident = l2cap_get_ident(conn);
 
-		schedule_delayed_work(&conn->info_timer, L2CAP_INFO_TIMEOUT);
+		queue_delayed_work(system_power_efficient_wq,
+				&conn->info_timer, L2CAP_INFO_TIMEOUT);
 
 		l2cap_send_cmd(conn, conn->info_ident, L2CAP_INFO_REQ,
 			       sizeof(info), &info);
@@ -5723,9 +5725,14 @@ static inline int l2cap_le_command_rej(struct l2cap_conn *conn,
 	if (!chan)
 		goto done;
 
+	chan = l2cap_chan_hold_unless_zero(chan);
+	if (!chan)
+		goto done;
+
 	l2cap_chan_lock(chan);
 	l2cap_chan_del(chan, ECONNREFUSED);
 	l2cap_chan_unlock(chan);
+	l2cap_chan_put(chan);
 
 done:
 	mutex_unlock(&conn->chan_lock);

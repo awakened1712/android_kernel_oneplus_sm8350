@@ -101,12 +101,6 @@ static int timed_poll_check_rscc(struct kgsl_device *device,
 		(value & mask) == expected_ret, 100, timeout * 1000);
 }
 
-void gmu_fault_snapshot(struct kgsl_device *device)
-{
-	device->gmu_fault = true;
-	kgsl_device_snapshot(device, NULL, true);
-}
-
 struct a6xx_gmu_device *to_a6xx_gmu(struct adreno_device *adreno_dev)
 {
 	struct a6xx_device *a6xx_dev = container_of(adreno_dev,
@@ -2055,26 +2049,6 @@ static irqreturn_t a6xx_gmu_irq_handler(int irq, void *data)
 	return IRQ_HANDLED;
 }
 
-void a6xx_gmu_snapshot(struct adreno_device *adreno_dev,
-	struct kgsl_snapshot *snapshot)
-{
-	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
-
-	/* No need to nmi if it was a gpu fault */
-	if (device->gmu_fault)
-		a6xx_gmu_send_nmi(adreno_dev, false);
-
-	a6xx_gmu_device_snapshot(device, snapshot);
-
-	a6xx_snapshot(adreno_dev, snapshot);
-
-	gmu_core_regwrite(device, A6XX_GMU_GMU2HOST_INTR_CLR,
-		0xffffffff);
-	gmu_core_regwrite(device, A6XX_GMU_GMU2HOST_INTR_MASK,
-		HFI_IRQ_MASK);
-
-}
-
 void a6xx_gmu_aop_send_acd_state(struct a6xx_gmu_device *gmu, bool flag)
 {
 	struct qmp_pkt msg;
@@ -2932,7 +2906,8 @@ static int a6xx_boot(struct adreno_device *adreno_dev)
 	struct kgsl_device *device = KGSL_DEVICE(adreno_dev);
 	int ret;
 
-	WARN_ON(test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags));
+	if (WARN_ON(test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags)))
+		return 0;
 
 	trace_kgsl_pwr_request_state(device, KGSL_STATE_ACTIVE);
 
@@ -2965,8 +2940,12 @@ static int a6xx_first_boot(struct adreno_device *adreno_dev)
 	int ret;
 	unsigned long priv = 0;
 
-	if (test_bit(GMU_PRIV_FIRST_BOOT_DONE, &gmu->flags))
-		return a6xx_boot(adreno_dev);
+	if (test_bit(GMU_PRIV_FIRST_BOOT_DONE, &gmu->flags)) {
+		if (!test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags))
+			return a6xx_boot(adreno_dev);
+
+		return 0;
+	}
 
 	place_marker("M - DRIVER ADRENO Init");
 
@@ -3277,7 +3256,7 @@ static void a6xx_gmu_touch_wakeup(struct adreno_device *adreno_dev)
 		return;
 
 	if (test_bit(GMU_PRIV_GPU_STARTED, &gmu->flags))
-		goto done;
+		return;
 
 	trace_kgsl_pwr_request_state(device, KGSL_STATE_ACTIVE);
 
@@ -3297,17 +3276,6 @@ static void a6xx_gmu_touch_wakeup(struct adreno_device *adreno_dev)
 	device->state = KGSL_STATE_ACTIVE;
 
 	trace_kgsl_pwr_set_state(device, KGSL_STATE_ACTIVE);
-
-done:
-	/*
-	 * When waking up from a touch event we want to stay active long enough
-	 * for the user to send a draw command.  The default idle timer timeout
-	 * is shorter than we want so go ahead and push the idle timer out
-	 * further for this special case
-	 */
-	mod_timer(&device->idle_timer, jiffies +
-			msecs_to_jiffies(adreno_wake_timeout));
-
 }
 
 const struct adreno_power_ops a6xx_gmu_power_ops = {

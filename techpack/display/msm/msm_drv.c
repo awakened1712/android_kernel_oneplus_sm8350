@@ -98,6 +98,8 @@
 
 static DEFINE_MUTEX(msm_release_lock);
 
+static struct kmem_cache *kmem_vblank_work_pool;
+
 static void msm_fb_output_poll_changed(struct drm_device *dev)
 {
 	struct msm_drm_private *priv = NULL;
@@ -375,7 +377,7 @@ static void vblank_ctrl_worker(struct kthread_work *work)
 	else
 		kms->funcs->disable_vblank(kms, priv->crtcs[cur_work->crtc_id]);
 
-	kfree(cur_work);
+	kmem_cache_free(kmem_vblank_work_pool, cur_work);
 }
 
 static int vblank_ctrl_queue_work(struct msm_drm_private *priv,
@@ -387,7 +389,7 @@ static int vblank_ctrl_queue_work(struct msm_drm_private *priv,
 	if (!priv || crtc_id >= priv->num_crtcs)
 		return -EINVAL;
 
-	cur_work = kzalloc(sizeof(*cur_work), GFP_ATOMIC);
+	cur_work = kmem_cache_zalloc(kmem_vblank_work_pool, GFP_ATOMIC);
 	if (!cur_work)
 		return -ENOMEM;
 
@@ -1004,6 +1006,25 @@ mdss_init_fail:
 	return ret;
 }
 
+void msm_atomic_flush_display_threads(struct msm_drm_private *priv)
+{
+	int i;
+
+	if (!priv) {
+		SDE_ERROR("invalid private data\n");
+		return;
+	}
+
+	for (i = 0; i < priv->num_crtcs; i++) {
+		if (priv->disp_thread[i].thread)
+			kthread_flush_worker(&priv->disp_thread[i].worker);
+		if (priv->event_thread[i].thread)
+			kthread_flush_worker(&priv->event_thread[i].worker);
+	}
+
+	kthread_flush_worker(&priv->pp_event_worker);
+}
+
 /*
  * DRM operations:
  */
@@ -1099,11 +1120,11 @@ static void msm_lastclose(struct drm_device *dev)
 			DRM_INFO("wait for crtc mask 0x%x failed, commit anyway...\n",
 				priv->pending_crtcs);
 
+#ifndef OPLUS_FEATURE_PXLW_IRIS5
 		rc = kms->funcs->trigger_null_flush(kms);
-		if (rc) {
-			DRM_ERROR("null flush commit failure during lastclose\n");
+		if (rc)
 			return;
-		}
+#endif
 	}
 
 	/*
@@ -1126,6 +1147,8 @@ static void msm_lastclose(struct drm_device *dev)
 	if (!rc)
 		DRM_INFO("wait for crtc mask 0x%x failed, commit anyway...\n",
 				priv->pending_crtcs);
+
+	msm_atomic_flush_display_threads(priv);
 
 	if (priv->fbdev) {
 		rc = drm_fb_helper_restore_fbdev_mode_unlocked(priv->fbdev);
@@ -2293,6 +2316,7 @@ static struct platform_driver msm_platform_driver = {
 		.of_match_table = dt_match,
 		.pm     = &msm_pm_ops,
 		.suppress_bind_attrs = true,
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 	},
 };
 
@@ -2302,6 +2326,7 @@ static int __init msm_drm_register(void)
 		return -EINVAL;
 
 	DBG("init");
+	kmem_vblank_work_pool = KMEM_CACHE(vblank_work, SLAB_HWCACHE_ALIGN | SLAB_PANIC);
 	sde_rsc_rpmh_register();
 	sde_rsc_register();
 	dsi_display_register();

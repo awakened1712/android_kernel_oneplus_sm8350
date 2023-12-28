@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  * Copyright (c) 2015-2021 The Linux Foundation. All rights reserved.
  * Copyright (C) 2013 Red Hat
  * Author: Rob Clark <robdclark@gmail.com>
@@ -278,6 +278,7 @@ struct sde_crtc_misr_info {
  * @misr_frame_count  : misr frame count provided by client
  * @misr_data     : store misr data before turning off the clocks.
  * @idle_notify_work: delayed worker to notify idle timeout to user space
+ * @early_wakeup_work: work to trigger early wakeup
  * @power_event   : registered power event handle
  * @cur_perf      : current performance committed to clock/bandwidth driver
  * @plane_mask_old: keeps track of the planes used in the previous commit
@@ -361,6 +362,7 @@ struct sde_crtc {
 	bool misr_reconfigure;
 	u32 misr_frame_count;
 	struct kthread_delayed_work idle_notify_work;
+	struct kthread_work early_wakeup_work;
 
 	struct sde_power_event *power_event;
 
@@ -976,5 +978,11 @@ void sde_crtc_reset_sw_state(struct drm_crtc *crtc);
  * @cstate:      Pointer to drm crtc state
  */
 void _sde_crtc_clear_dim_layers_v1(struct drm_crtc_state *state);
+
+/**
+ * sde_crtc_cancel_delayed_work - cancel any pending work items for a given crtc
+ * @crtc: Pointer to DRM crtc object
+ */
+void sde_crtc_cancel_delayed_work(struct drm_crtc *crtc);
 
 #endif /* _SDE_CRTC_H_ */

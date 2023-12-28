@@ -803,8 +803,6 @@ void dpm_resume_noirq(pm_message_t state)
 
 	resume_device_irqs();
 	device_wakeup_disarm_wake_irqs();
-
-	cpuidle_resume();
 }
 
 static pm_callback_t dpm_subsys_resume_early_cb(struct device *dev,
@@ -900,6 +898,10 @@ void dpm_resume_early(pm_message_t state)
 {
 	struct device *dev;
 	ktime_t starttime = ktime_get();
+
+#ifdef CONFIG_BOEFFLA_WL_BLOCKER
+	pm_print_active_wakeup_sources();
+#endif
 
 	trace_suspend_resume(TPS("dpm_resume_early"), state.event, true);
 	mutex_lock(&dpm_list_mtx);
@@ -1445,8 +1447,6 @@ static int dpm_noirq_suspend_devices(pm_message_t state)
 int dpm_suspend_noirq(pm_message_t state)
 {
 	int ret;
-
-	cpuidle_pause();
 
 	device_wakeup_arm_wake_irqs();
 	suspend_device_irqs();

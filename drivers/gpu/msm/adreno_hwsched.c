@@ -454,8 +454,6 @@ static int hwsched_sendcmds(struct adreno_device *adreno_dev,
 			break;
 		}
 
-		drawctxt->submitted_timestamp = timestamp;
-
 		count++;
 	}
 
@@ -672,7 +670,6 @@ static inline int _verify_cmdobj(struct kgsl_device_private *dev_priv,
 		struct kgsl_context *context, struct kgsl_drawobj *drawobj[],
 		uint32_t count)
 {
-	struct kgsl_device *device = dev_priv->device;
 	struct kgsl_memobj_node *ib;
 	unsigned int i;
 
@@ -685,13 +682,6 @@ static inline int _verify_cmdobj(struct kgsl_device_private *dev_priv,
 				if (!_verify_ib(dev_priv,
 					&ADRENO_CONTEXT(context)->base, ib))
 					return -EINVAL;
-
-			/*
-			 * Clear the wake on touch bit to indicate an IB has
-			 * been submitted since the last time we set it.
-			 * But only clear it when we have rendering commands.
-			 */
-			device->flags &= ~KGSL_FLAG_WAKE_ON_TOUCH;
 		}
 	}
 
@@ -752,7 +742,6 @@ static void _queue_drawobj(struct adreno_context *drawctxt,
 	drawctxt->drawqueue_tail = (drawctxt->drawqueue_tail + 1) %
 			ADRENO_CONTEXT_DRAWQUEUE_SIZE;
 	drawctxt->queued++;
-	trace_adreno_cmdbatch_queued(drawobj, drawctxt->queued);
 }
 
 static int _queue_cmdobj(struct adreno_device *adreno_dev,
@@ -1296,18 +1285,14 @@ static void reset_and_snapshot(struct adreno_device *adreno_dev)
 	if (device->state != KGSL_STATE_ACTIVE)
 		return;
 
-	if (!obj) {
-		kgsl_device_snapshot(device, NULL, false);
+	if (!obj)
 		goto done;
-	}
 
 	drawobj = DRAWOBJ(obj->cmdobj);
 
 	context = drawobj->context;
 
 	do_fault_header(adreno_dev, drawobj);
-
-	kgsl_device_snapshot(device, context, false);
 
 	force_retire_timestamp(device, drawobj);
 
@@ -1435,33 +1420,4 @@ void adreno_hwsched_mark_drawobj(struct adreno_device *adreno_dev,
 	adreno_hwsched_set_fault(adreno_dev);
 
 	mutex_unlock(&hwsched->mutex);
-}
-
-void adreno_hwsched_parse_fault_cmdobj(struct adreno_device *adreno_dev,
-	struct kgsl_snapshot *snapshot)
-{
-	struct adreno_hwsched *hwsched = to_hwsched(adreno_dev);
-	struct cmd_list_obj *obj, *tmp;
-
-	/*
-	 * During IB parse, vmalloc is called which can sleep and
-	 * should not be called from atomic context. Since IBs are not
-	 * dumped during atomic snapshot, there is no need to parse it.
-	 */
-	if (adreno_dev->dev.snapshot_atomic)
-		return;
-
-	list_for_each_entry_safe(obj, tmp, &hwsched->cmd_list, node) {
-		struct kgsl_drawobj_cmd *cmdobj = obj->cmdobj;
-
-		if (test_bit(CMDOBJ_FAULT, &cmdobj->priv)) {
-			struct kgsl_memobj_node *ib;
-
-			list_for_each_entry(ib, &cmdobj->cmdlist, node) {
-				adreno_parse_ib(KGSL_DEVICE(adreno_dev),
-					snapshot, snapshot->process,
-					ib->gpuaddr, ib->size >> 2);
-			}
-		}
-	}
 }

@@ -964,8 +964,9 @@ static int dsi_panel_update_backlight(struct dsi_panel *panel,
 		bl_lvl = (((bl_lvl & 0xff) << 8) | (bl_lvl >> 8));
 
 #ifdef OPLUS_BUG_STABILITY
-	if ((get_oplus_display_scene() == OPLUS_DISPLAY_AOD_SCENE) && ( bl_lvl == 1)) {
-		pr_err("dsi_cmd AOD mode return bl_lvl:%d\n",bl_lvl);
+	if (get_oplus_display_scene() == OPLUS_DISPLAY_AOD_SCENE) {
+		/* Don't set backlight; just update AoD mode */
+		oplus_update_aod_light_mode_unlock(panel);
 		return 0;
 	}
 
@@ -2936,14 +2937,12 @@ static int dsi_panel_parse_misc_features(struct dsi_panel *panel)
 	const char *string;
 	int i, rc = 0;
 
-	panel->ulps_feature_enabled =
-		utils->read_bool(utils->data, "qcom,ulps-enabled");
+	panel->ulps_feature_enabled = true;
 
 	DSI_DEBUG("%s: ulps feature %s\n", __func__,
 		(panel->ulps_feature_enabled ? "enabled" : "disabled"));
 
-	panel->ulps_suspend_enabled =
-		utils->read_bool(utils->data, "qcom,suspend-ulps-enabled");
+	panel->ulps_suspend_enabled = true;
 
 	DSI_DEBUG("%s: ulps during suspend feature %s\n", __func__,
 		(panel->ulps_suspend_enabled ? "enabled" : "disabled"));
@@ -4978,7 +4977,9 @@ void dsi_panel_put_mode(struct dsi_display_mode *mode)
 		dsi_panel_dealloc_cmd_packets(&mode->priv_info->cmd_sets[i]);
 	}
 
+	kfree(mode->priv_info->phy_timing_val);
 	kfree(mode->priv_info);
+	mode->priv_info = NULL;
 }
 
 void dsi_panel_calc_dsi_transfer_time(struct dsi_host_common_cfg *config,
@@ -5465,6 +5466,13 @@ int dsi_panel_set_lp2(struct dsi_panel *panel)
 	if (!panel->panel_initialized)
 		goto exit;
 
+	//It has been observed entering lp2 without first entering lp1 on doze.
+	//In this case regulator stays in NORMAL mode, which is a power regression.
+	if (dsi_panel_is_type_oled(panel) &&
+	    panel->power_mode != SDE_MODE_DPMS_LP1)
+		dsi_pwr_panel_regulator_mode_set(&panel->power_info,
+			"ibb", REGULATOR_MODE_IDLE);
+
 	rc = dsi_panel_tx_cmd_set(panel, DSI_CMD_SET_LP2);
 	if (rc)
 		DSI_ERR("[%s] failed to send DSI_CMD_SET_LP2 cmd, rc=%d\n",
@@ -5472,6 +5480,7 @@ int dsi_panel_set_lp2(struct dsi_panel *panel)
 #ifdef OPLUS_BUG_STABILITY
 	set_oplus_display_power_status(OPLUS_DISPLAY_POWER_DOZE_SUSPEND);
 #endif
+	panel->need_power_on_backlight = true;
 exit:
 	mutex_unlock(&panel->panel_lock);
 	return rc;

@@ -1,8 +1,81 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /*
- * Copyright (c) 2011-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2011-2020, The Linux Foundation. All rights reserved.
  */
 
+#define trace_gpu_frequency(...) ((void)0)
+#define trace_kgsl_a3xx_irq_status(...) ((void)0)
+#define trace_kgsl_a4xx_irq_status(...) ((void)0)
+#define trace_kgsl_a5xx_irq_status(...) ((void)0)
+#define trace_kgsl_active_count(...) ((void)0)
+#define trace_kgsl_aux_command(...) ((void)0)
+#define trace_kgsl_buslevel(...) ((void)0)
+#define trace_kgsl_bus(...) ((void)0)
+#define trace_kgsl_clk(...) ((void)0)
+#define trace_kgsl_clock_throttling(...) ((void)0)
+#define trace_kgsl_constraint(...) ((void)0)
+#define trace_kgsl_context_create(...) ((void)0)
+#define trace_kgsl_context_destroy(...) ((void)0)
+#define trace_kgsl_context_detach(...) ((void)0)
+#define trace_kgsl_drawobj_timeline(...) ((void)0)
+#define trace_kgsl_fire_event(...) ((void)0)
+#define trace_kgsl_gmu_oob_clear(...) ((void)0)
+#define trace_kgsl_gmu_oob_set(...) ((void)0)
+#define trace_kgsl_gpubusy(...) ((void)0)
+#define trace_kgsl_hfi_receive(...) ((void)0)
+#define trace_kgsl_hfi_send(...) ((void)0)
+#define trace_kgsl_irq(...) ((void)0)
+#define trace_kgsl_issueibcmds(...) ((void)0)
+#define trace_kgsl_mem_alloc(...) ((void)0)
+#define trace_kgsl_mem_free(...) ((void)0)
+#define trace_kgsl_mem_map(...) ((void)0)
+#define trace_kgsl_mem_mmap(...) ((void)0)
+#define trace_kgsl_mem_sync_cache(...) ((void)0)
+#define trace_kgsl_mem_sync_full_cache(...) ((void)0)
+#define trace_kgsl_mem_timestamp_free(...) ((void)0)
+#define trace_kgsl_mem_timestamp_queue(...) ((void)0)
+#define trace_kgsl_mem_unmapped_area_collision(...) ((void)0)
+#define trace_kgsl_mmu_pagefault(...) ((void)0)
+#define trace_kgsl_msg(...) ((void)0)
+#define trace_kgsl_opp_notify(...) ((void)0)
+#define trace_kgsl_pagetable_destroy(...) ((void)0)
+#define trace_kgsl_pool_add_page(...) ((void)0)
+#define trace_kgsl_pool_alloc_page_system(...) ((void)0)
+#define trace_kgsl_pool_free_page(...) ((void)0)
+#define trace_kgsl_pool_get_page(...) ((void)0)
+#define trace_kgsl_pool_try_page_lower(...) ((void)0)
+#define trace_kgsl_popp_level(...) ((void)0)
+#define trace_kgsl_popp_mod(...) ((void)0)
+#define trace_kgsl_popp_nap(...) ((void)0)
+#define trace_kgsl_pwrlevel(...) ((void)0)
+#define trace_kgsl_pwrstats(...) ((void)0)
+#define trace_kgsl_pwr_request_state(...) ((void)0)
+#define trace_kgsl_pwr_set_state(...) ((void)0)
+#define trace_kgsl_rail(...) ((void)0)
+#define trace_kgsl_readtimestamp(...) ((void)0)
+#define trace_kgsl_register_event(...) ((void)0)
+#define trace_kgsl_regwrite(...) ((void)0)
+#define trace_kgsl_timeline_alloc(...) ((void)0)
+#define trace_kgsl_timeline_destroy(...) ((void)0)
+#define trace_kgsl_timeline_fence_alloc(...) ((void)0)
+#define trace_kgsl_timeline_fence_release(...) ((void)0)
+#define trace_kgsl_timeline_signal(...) ((void)0)
+#define trace_kgsl_timeline_wait(...) ((void)0)
+#define trace_kgsl_user_pwrlevel_constraint(...) ((void)0)
+#define trace_kgsl_waittimestamp_entry(...) ((void)0)
+#define trace_kgsl_waittimestamp_exit(...) ((void)0)
+#define trace_sparse_bind(...) ((void)0)
+#define trace_sparse_phys_alloc(...) ((void)0)
+#define trace_sparse_phys_free(...) ((void)0)
+#define trace_sparse_unbind(...) ((void)0)
+#define trace_sparse_virt_alloc(...) ((void)0)
+#define trace_sparse_virt_free(...) ((void)0)
+#define trace_syncpoint_fence(...) ((void)0)
+#define trace_syncpoint_fence_expire(...) ((void)0)
+#define trace_syncpoint_timestamp(...) ((void)0)
+#define trace_syncpoint_timestamp_expire(...) ((void)0)
+
+#if 0
 #if !defined(_KGSL_TRACE_H) || defined(TRACE_HEADER_MULTI_READ)
 #define _KGSL_TRACE_H
 
@@ -1338,81 +1411,8 @@ TRACE_EVENT(kgsl_drawobj_timeline,
 	)
 );
 
-TRACE_EVENT(kgsl_pool_add_page,
-	TP_PROTO(int order, u32 count),
-	TP_ARGS(order, count),
-	TP_STRUCT__entry(
-		__field(int, order)
-		__field(u32, count)
-	),
-	TP_fast_assign(
-		__entry->order = order;
-		__entry->count = count;
-	),
-	TP_printk("order=%d count=%u",
-		__entry->order, __entry->count
-	)
-);
-
-TRACE_EVENT(kgsl_pool_get_page,
-	TP_PROTO(int order, u32 count),
-	TP_ARGS(order, count),
-	TP_STRUCT__entry(
-		__field(int, order)
-		__field(u32, count)
-	),
-	TP_fast_assign(
-		__entry->order = order;
-		__entry->count = count;
-	),
-	TP_printk("order=%d count=%u",
-		__entry->order, __entry->count
-	)
-);
-
-TRACE_EVENT(kgsl_pool_alloc_page_system,
-	TP_PROTO(int order),
-	TP_ARGS(order),
-	TP_STRUCT__entry(
-		__field(int, order)
-	),
-	TP_fast_assign(
-		__entry->order = order;
-	),
-	TP_printk("order=%d",
-		__entry->order
-	)
-);
-
-TRACE_EVENT(kgsl_pool_try_page_lower,
-	TP_PROTO(int order),
-	TP_ARGS(order),
-	TP_STRUCT__entry(
-		__field(int, order)
-	),
-	TP_fast_assign(
-		__entry->order = order;
-	),
-	TP_printk("order=%d",
-		__entry->order
-	)
-);
-
-TRACE_EVENT(kgsl_pool_free_page,
-	TP_PROTO(int order),
-	TP_ARGS(order),
-	TP_STRUCT__entry(
-		__field(int, order)
-	),
-	TP_fast_assign(
-		__entry->order = order;
-	),
-	TP_printk("order=%d",
-		__entry->order
-	)
-);
-
 #endif /* _KGSL_TRACE_H */
 
 /* This part must be outside protection */
 #include <trace/define_trace.h>
+#endif

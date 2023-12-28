@@ -239,6 +239,54 @@ static int _sde_debugfs_fps_status(struct inode *inode, struct file *file)
 }
 #endif
 
+static ssize_t early_wakeup_store(struct device *device,
+		struct device_attribute *attr, const char *buf, size_t count)
+{
+	struct drm_crtc *crtc;
+	struct sde_crtc *sde_crtc;
+	struct msm_drm_private *priv;
+	u32 crtc_id;
+	bool trigger;
+
+	if (!device || !buf || !count) {
+		SDE_ERROR("invalid input param(s)\n");
+		return -EINVAL;
+	}
+
+	if (kstrtobool(buf, &trigger) < 0)
+		return -EINVAL;
+
+	if (!trigger)
+		return count;
+
+	crtc = dev_get_drvdata(device);
+	if (!crtc || !crtc->dev || !crtc->dev->dev_private) {
+		SDE_ERROR("invalid crtc\n");
+		return -EINVAL;
+	}
+
+	sde_crtc = to_sde_crtc(crtc);
+	priv = crtc->dev->dev_private;
+
+	crtc_id = drm_crtc_index(crtc);
+	if (crtc_id >= ARRAY_SIZE(priv->disp_thread)) {
+		SDE_ERROR("invalid crtc index[%d]\n", crtc_id);
+		return -EINVAL;
+	}
+
+	kthread_queue_work(&priv->disp_thread[crtc_id].worker,
+			&sde_crtc->early_wakeup_work);
+
+	return count;
+}
+
+static ssize_t early_wakeup_show(struct device *device,
+		struct device_attribute *attr, char *buf)
+{
+
+    return 0;
+}
+
 static ssize_t fps_periodicity_ms_store(struct device *device,
 		struct device_attribute *attr, const char *buf, size_t count)
 {
@@ -425,12 +473,14 @@ static DEVICE_ATTR_RO(vsync_event);
 static DEVICE_ATTR_RO(measured_fps);
 static DEVICE_ATTR_RW(fps_periodicity_ms);
 static DEVICE_ATTR_RO(retire_frame_event);
+static DEVICE_ATTR_RW(early_wakeup);
 
 static struct attribute *sde_crtc_dev_attrs[] = {
 	&dev_attr_vsync_event.attr,
 	&dev_attr_measured_fps.attr,
 	&dev_attr_fps_periodicity_ms.attr,
 	&dev_attr_retire_frame_event.attr,
+	&dev_attr_early_wakeup.attr,
 	NULL
 };
 
@@ -1445,7 +1495,7 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 	struct drm_plane_state *state;
 	struct sde_crtc_state *cstate;
 	struct sde_plane_state *pstate = NULL;
-	struct plane_state *pstates = NULL;
+	struct plane_state pstates[SDE_PSTATES_MAX];
 	struct sde_format *format;
 	struct sde_hw_ctl *ctl;
 	struct sde_hw_mixer *lm;
@@ -1466,10 +1516,6 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 	ctl = mixer->hw_ctl;
 	lm = mixer->hw_lm;
 	cstate = to_sde_crtc_state(crtc->state);
-	pstates = kcalloc(SDE_PSTATES_MAX,
-			sizeof(struct plane_state), GFP_KERNEL);
-	if (!pstates)
-		return;
 
 	memset(fetch_active, 0, sizeof(fetch_active));
 	memset(zpos_cnt, 0, sizeof(zpos_cnt));
@@ -1503,7 +1549,7 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 		format = to_sde_format(msm_framebuffer_format(pstate->base.fb));
 		if (!format) {
 			SDE_ERROR("invalid format\n");
-			goto end;
+			return;
 		}
 
 		blend_type = sde_plane_get_property(pstate,
@@ -1595,13 +1641,13 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 			{
 				struct dsi_display *display = get_main_display();
 				if (!display || !display->panel)
-					goto end;
+					return;
 				if ((old_state->mode.vrefresh == 60 ||  old_state->mode.vrefresh == 90) &&
 									crtc->mode.vrefresh  == 120 && !display->panel->is_hbm_enabled) {
 					SDE_ATRACE_BEGIN("delay_config_dimlayer_one_frame");
 					pr_err("do not config dimlayer at the fps switch");
 					SDE_ATRACE_END("delay_config_dimlayer_one_frame");
-					goto end;
+					return;
 				}
 			}
 
@@ -1636,9 +1682,6 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 		}
 #endif
 	}
-
-end:
-	kfree(pstates);
 }
 
 static void _sde_crtc_swap_mixers_for_right_partial_update(
@@ -3981,8 +4024,6 @@ void sde_crtc_commit_kickoff(struct drm_crtc *crtc,
 	}
 	sde_crtc->play_count++;
 
-	sde_vbif_clear_errors(sde_kms);
-
 	if (is_error) {
 		_sde_crtc_remove_pipe_flush(crtc);
 		_sde_crtc_blend_setup(crtc, old_state, false);
@@ -4866,6 +4907,7 @@ static int _sde_crtc_check_secure_state(struct drm_crtc *crtc,
 extern int oplus_onscreenfp_status;
 extern int lcd_closebl_flag_fp;
 extern int oplus_dimlayer_hbm;
+extern int oplus_dimlayer_aod;
 extern int oplus_dimlayer_bl_alpha_value;
 extern int oplus_dimlayer_bl_enable;
 extern bool oplus_ffl_trigger_finish;
@@ -4882,9 +4924,9 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 	int aod_index = -1;
 	int zpos = INT_MAX;
 	int mode;
-	int panel_power_mode;
 	int fp_mode = oplus_onscreenfp_status;
 	int dimlayer_hbm = oplus_dimlayer_hbm;
+	int dimlayer_aod = oplus_dimlayer_aod;
 	int dimlayer_bl = 0;
 	int i;
 	//#ifdef OPLUS_BUG_STABILITY
@@ -5000,28 +5042,8 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 			cstate->fingerprint_mode = false;
 
 		SDE_DEBUG("debug for get cstate->fingerprint_mode = %d\n", cstate->fingerprint_mode);
-		panel_power_mode = oplus_get_panel_power_mode();
-
-		/* when aod layer is present */
-		if (aod_index >= 0) {
-			/* set dimlayer alpha transparent, appear AOD layer by force */
-			if (((fp_index >= 0) || (fppressed_index < 0)) &&
-				((panel_power_mode == SDE_MODE_DPMS_LP1) || (panel_power_mode == SDE_MODE_DPMS_LP2))) {
-				oplus_set_aod_dim_alpha(CUST_A_TRANS);
-			}
-			/*
-			 * set dimlayer alpha opaque, disappear AOD layer by force when pressed down
-			 * and SDE_MODE_DPMS_LP1/SDE_MODE_DPMS_LP2
-			 */
-			if (((fp_mode == 1) && (panel_power_mode != SDE_MODE_DPMS_ON)) || (oplus_request_power_status == 2))
-				oplus_set_aod_dim_alpha(CUST_A_OPAQUE);
-		} else { /* when screen on, restore dimlayer alpha */
-			if (oplus_get_panel_brightness() != 0)
-				oplus_set_aod_dim_alpha(CUST_A_NO);
-		}
-
-		SDE_DEBUG("aod_index = %d, fp_index= %d, fppressed_index = %d, fp_mode=%d, panel_power_mode = %d, bl=%d\n",
-			aod_index, fp_index, fppressed_index, fp_mode, panel_power_mode, oplus_get_panel_brightness());
+		SDE_DEBUG("aod_index = %d, fp_index= %d, fppressed_index = %d, fp_mode=%d, bl=%d\n",
+			aod_index, fp_index, fppressed_index, fp_mode, oplus_get_panel_brightness());
 
 		/* find the min zpos in fp_index/fppressed_index stage to dim layer, then fp_index/fppressed_index stage increase one */
 		if (fp_index >= 0) {
@@ -5040,7 +5062,7 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 			}
 		}
 
-		/* when no aod_index/fppressed_index/fp_index layer, dim layer's zpos is the most stage */
+		/* when no fppressed_index/fp_index layer, dim layer's zpos is the most stage */
 		if (zpos == INT_MAX) {
 			zpos = 0;
 			for (i = 0; i < cnt; i++) {
@@ -5062,12 +5084,21 @@ static int sde_crtc_onscreenfinger_atomic_check(struct sde_crtc_state *cstate,
 			cstate->fingerprint_pressed = false;
 
 		SDE_DEBUG("debug for get cstate->fingerprint_pressed = %d\n", cstate->fingerprint_pressed);
+	} else if (dimlayer_aod) {
+		zpos = 0;
+		/* look for highest stage for dimlayer's zpos */
+		for (i = 0; i < cnt; i++) {
+			if (pstates[i].stage > zpos)
+				zpos = pstates[i].stage;
+		}
+		zpos++;
+		if (sde_crtc_config_fingerprint_dim_layer(&cstate->base, zpos)) {
+			//SDE_ERROR("Failed to config dim layer\n");
+			SDE_EVT32(zpos, fp_index, aod_index, fppressed_index, cstate->num_dim_layers);
+			return -EINVAL;
+		}
 	} else {
 		oplus_underbrightness_alpha = 0;
-		oplus_set_aod_dim_alpha(CUST_A_NO);
-		cstate->fingerprint_dim_layer = NULL;
-		cstate->fingerprint_mode = false;
-		cstate->fingerprint_pressed = false;
 	}
 	SDE_EVT32(cstate->fingerprint_dim_layer);
 
@@ -5393,11 +5424,11 @@ static int sde_crtc_atomic_check(struct drm_crtc *crtc,
 {
 	struct drm_device *dev;
 	struct sde_crtc *sde_crtc;
-	struct plane_state *pstates = NULL;
+	struct plane_state pstates[SDE_PSTATES_MAX];
 	struct sde_crtc_state *cstate;
 	struct drm_display_mode *mode;
 	int rc = 0;
-	struct sde_multirect_plane_states *multirect_plane = NULL;
+	struct sde_multirect_plane_states multirect_plane[SDE_MULTIRECT_PLANE_MAX];
 	struct drm_connector *conn;
 	struct drm_connector_list_iter conn_iter;
 
@@ -5413,18 +5444,6 @@ static int sde_crtc_atomic_check(struct drm_crtc *crtc,
 	if (!state->enable || !state->active) {
 		SDE_DEBUG("crtc%d -> enable %d, active %d, skip atomic_check\n",
 				crtc->base.id, state->enable, state->active);
-		goto end;
-	}
-
-	pstates = kcalloc(SDE_PSTATES_MAX,
-			sizeof(struct plane_state), GFP_KERNEL);
-
-	multirect_plane = kcalloc(SDE_MULTIRECT_PLANE_MAX,
-			sizeof(struct sde_multirect_plane_states),
-			GFP_KERNEL);
-
-	if (!pstates || !multirect_plane) {
-		rc = -ENOMEM;
 		goto end;
 	}
 
@@ -5490,8 +5509,6 @@ static int sde_crtc_atomic_check(struct drm_crtc *crtc,
 		goto end;
 	}
 end:
-	kfree(pstates);
-	kfree(multirect_plane);
 	return rc;
 }
 
@@ -5977,7 +5994,7 @@ static int sde_crtc_atomic_set_property(struct drm_crtc *crtc,
 	}
 	priv = crtc->dev->dev_private;
 #else
-        if (!crtc || !state || !property) {
+        if (unlikely(!crtc || !state || !property)) {
                 SDE_ERROR("invalid argument(s)\n");
                 return -EINVAL;
         }
@@ -5992,13 +6009,13 @@ static int sde_crtc_atomic_set_property(struct drm_crtc *crtc,
 #endif /* OPLUS_BUG_STABILITY */
 	/* check with cp property system first */
 	ret = sde_cp_crtc_set_property(crtc, property, val);
-	if (ret != -ENOENT)
+	if (unlikely(ret != -ENOENT))
 		goto exit;
 
 	/* if not handled by cp, check msm_property system */
 	ret = msm_property_atomic_set(&sde_crtc->property_info,
 			&cstate->property_state, property, val);
-	if (ret)
+	if (unlikely(ret))
 		goto exit;
 
 	idx = msm_property_index(&sde_crtc->property_info, property);
@@ -6036,7 +6053,7 @@ static int sde_crtc_atomic_set_property(struct drm_crtc *crtc,
 		cstate->bw_split_vote = true;
 		break;
 	case CRTC_PROP_OUTPUT_FENCE:
-		if (!val)
+		if (unlikely(!val))
 			goto exit;
 
 		ret = copy_from_user(&prev_user_fd, (void __user *)val,
@@ -6054,14 +6071,14 @@ static int sde_crtc_atomic_set_property(struct drm_crtc *crtc,
 		if (prev_user_fd == -1) {
 			ret = _sde_crtc_get_output_fence(crtc, state,
 					&fence_user_fd);
-			if (ret) {
+			if (unlikely(ret)) {
 				SDE_ERROR("fence create failed rc:%d\n", ret);
 				goto exit;
 			}
 
 			ret = copy_to_user((uint64_t __user *)(uintptr_t)val,
 					&fence_user_fd, sizeof(uint64_t));
-			if (ret) {
+			if (unlikely(ret)) {
 				SDE_ERROR("copy to user failed rc:%d\n", ret);
 				put_unused_fd(fence_user_fd);
 				ret = -EFAULT;
@@ -7042,6 +7059,58 @@ static void __sde_crtc_idle_notify_work(struct kthread_work *work)
 	}
 }
 
+void sde_crtc_cancel_delayed_work(struct drm_crtc *crtc)
+{
+	struct sde_crtc *sde_crtc;
+	struct sde_crtc_state *cstate;
+	bool idle_status;
+	bool cache_status;
+
+	if (!crtc || !crtc->state)
+		return;
+
+	sde_crtc = to_sde_crtc(crtc);
+	cstate = to_sde_crtc_state(crtc->state);
+
+	idle_status = kthread_cancel_delayed_work_sync(&sde_crtc->idle_notify_work);
+	cache_status = kthread_cancel_delayed_work_sync(&sde_crtc->static_cache_read_work);
+	SDE_EVT32(DRMID(crtc), idle_status, cache_status);
+}
+
+/*
+ * __sde_crtc_early_wakeup_work - trigger early wakeup from user space
+ */
+static void __sde_crtc_early_wakeup_work(struct kthread_work *work)
+{
+	struct sde_crtc *sde_crtc = container_of(work, struct sde_crtc,
+				early_wakeup_work);
+	struct drm_crtc *crtc;
+	struct drm_device *dev;
+	struct msm_drm_private *priv;
+	struct sde_kms *sde_kms;
+
+	if (!sde_crtc) {
+		SDE_ERROR("invalid sde crtc\n");
+		return;
+	}
+
+	if (!sde_crtc->enabled) {
+		SDE_INFO("sde crtc is not enabled\n");
+		return;
+	}
+
+	crtc = &sde_crtc->base;
+	dev = crtc->dev;
+	if (!dev) {
+		SDE_ERROR("invalid drm device\n");
+		return;
+	}
+
+	priv = dev->dev_private;
+	sde_kms = to_sde_kms(priv->kms);
+	sde_kms_trigger_early_wakeup(sde_kms, crtc);
+}
+
 /* initialize crtc */
 struct drm_crtc *sde_crtc_init(struct drm_device *dev, struct drm_plane *plane)
 {
@@ -7138,6 +7207,8 @@ struct drm_crtc *sde_crtc_init(struct drm_device *dev, struct drm_plane *plane)
 					__sde_crtc_idle_notify_work);
 	kthread_init_delayed_work(&sde_crtc->static_cache_read_work,
 			__sde_crtc_static_cache_read_work);
+	kthread_init_work(&sde_crtc->early_wakeup_work,
+					__sde_crtc_early_wakeup_work);
 
 	SDE_DEBUG("crtc=%d new_llcc=%d, old_llcc=%d\n",
 		crtc->base.id,

@@ -2304,11 +2304,8 @@ void init_new_task_load(struct task_struct *p)
 		p->wts.busy_buckets[i] = 0;
 
 	p->wts.cpu_cycles = 0;
-
-	p->wts.curr_window_cpu = kcalloc(nr_cpu_ids, sizeof(u32),
-					  GFP_KERNEL | __GFP_NOFAIL);
-	p->wts.prev_window_cpu = kcalloc(nr_cpu_ids, sizeof(u32),
-					  GFP_KERNEL | __GFP_NOFAIL);
+	memset(&p->wts.curr_window_cpu, 0, sizeof(u32) * nr_cpu_ids);
+	memset(&p->wts.prev_window_cpu, 0, sizeof(u32) * nr_cpu_ids);
 
 	if (init_load_pct) {
 		init_load_windows = div64_u64((u64)init_load_pct *
@@ -2328,40 +2325,17 @@ void init_new_task_load(struct task_struct *p)
 	p->wts.unfilter = sysctl_sched_task_unfilter_period;
 }
 
-/*
- * kfree() may wakeup kswapd. So this function should NOT be called
- * with any CPU's rq->lock acquired.
- */
-void free_task_load_ptrs(struct task_struct *p)
-{
-	kfree(p->wts.curr_window_cpu);
-	kfree(p->wts.prev_window_cpu);
-
-	/*
-	 * walt_update_task_ravg() can be called for exiting tasks. While the
-	 * function itself ensures correct behavior, the corresponding
-	 * trace event requires that these pointers be NULL.
-	 */
-	p->wts.curr_window_cpu = NULL;
-	p->wts.prev_window_cpu = NULL;
-}
-
 void walt_task_dead(struct task_struct *p)
 {
 	sched_set_group_id(p, 0);
-	free_task_load_ptrs(p);
 }
 
 void reset_task_stats(struct task_struct *p)
 {
 	int i = 0;
-	u32 *curr_window_ptr;
-	u32 *prev_window_ptr;
 
-	curr_window_ptr =  p->wts.curr_window_cpu;
-	prev_window_ptr = p->wts.prev_window_cpu;
-	memset(curr_window_ptr, 0, sizeof(u32) * nr_cpu_ids);
-	memset(prev_window_ptr, 0, sizeof(u32) * nr_cpu_ids);
+	memset(p->wts.curr_window_cpu, 0, sizeof(u32) * nr_cpu_ids);
+	memset(p->wts.prev_window_cpu, 0, sizeof(u32) * nr_cpu_ids);
 
 	p->wts.mark_start = 0;
 	p->wts.sum = 0;
@@ -2377,9 +2351,6 @@ void reset_task_stats(struct task_struct *p)
 	p->wts.demand_scaled = 0;
 	p->wts.pred_demand_scaled = 0;
 	p->wts.active_time = 0;
-
-	p->wts.curr_window_cpu = curr_window_ptr;
-	p->wts.prev_window_cpu = prev_window_ptr;
 }
 
 void mark_task_starting(struct task_struct *p)

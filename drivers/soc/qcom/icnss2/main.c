@@ -4067,6 +4067,8 @@ static int icnss_probe(struct platform_device *pdev)
 	if (ret)
 		goto out_free_resources;
 
+	device_enable_async_suspend(dev);
+
 	spin_lock_init(&priv->event_lock);
 	spin_lock_init(&priv->on_off_lock);
 	spin_lock_init(&priv->soc_wake_msg_lock);
@@ -4454,6 +4456,7 @@ static struct platform_driver icnss_driver = {
 		.name = "icnss2",
 		.pm = &icnss_pm_ops,
 		.of_match_table = icnss_dt_match,
+		.probe_type = PROBE_PREFER_ASYNCHRONOUS,
 	},
 };
 
